@@ -2,7 +2,8 @@ name: Desplegar en GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # la rama por defecto actual del repo y main, por si más adelante se crea
+    branches: [main, claude/nifty-knuth-agsrxj]
   workflow_dispatch:
 
 permissions:
