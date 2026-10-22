@@ -12,8 +12,7 @@ import { Viewer } from "./scene/viewer";
 import { buildTerrainMesh, sampleSurface, type TerrainSurface } from "./scene/terrainMesh";
 import { buildBuildings, recordForFace, type BuildingOptions, type BuildingRecord, type HeightOverride } from "./scene/buildings";
 import { buildRoads } from "./scene/roads";
-import { buildWater } from "./scene/water";
-import { buildTrees } from "./scene/trees";
+import { buildWater, carveWaterBodies, waterBodies } from "./scene/water";
 import { facadeTexture } from "./scene/textures";
 import { paintMapTexture } from "./scene/mapTexture";
 import {
@@ -48,7 +47,7 @@ interface Project {
   terrain: THREE.Group;
   /** Textura del terreno, reutilizada para proyectar la ortofoto en las cubiertas. */
   texture: THREE.Texture | null;
-  facade: THREE.Texture;
+  facade: THREE.Texture | null;
 }
 
 let bbox: BBox | null = null;
@@ -207,6 +206,12 @@ async function generate() {
       texture.userData.mimeType = "image/jpeg";
     }
 
+    // el agua se calcula antes de la malla: el terreno se rebaja bajo cada lámina
+    // para que el DEM (ruidoso sobre el agua) nunca la tape
+    const wantWater = !!osm && $<HTMLInputElement>("with-water").checked;
+    const bodies = wantWater ? waterBodies(osm!.areas, frame, surface) : [];
+    carveWaterBodies(surface, bodies);
+
     viewer.clearContent();
     clearUserLists();
     const terrain = buildTerrainMesh(surface, texture);
@@ -218,18 +223,12 @@ async function generate() {
       const roads = buildRoads(osm.roads, osm.railways, frame, surface);
       if (roads) viewer.content.add(roads);
     }
-    if (osm && $<HTMLInputElement>("with-water").checked) {
-      const water = buildWater(osm.areas, osm.waterways, frame, surface);
+    if (wantWater) {
+      const water = buildWater(bodies, osm!.waterways, frame, surface);
       if (water) viewer.content.add(water);
+      log(`Agua: ${bodies.length} láminas, ${osm!.waterways.length} cauces`);
     }
     rebuildBuildings();
-    if ($<HTMLInputElement>("with-trees").checked) {
-      const trees = buildTrees(osm, frame, surface, { maxTrees: isTouch ? 8000 : 25000, imagery });
-      if (trees) {
-        viewer.content.add(trees);
-        log(`Vegetación: ${(trees.children[0] as THREE.InstancedMesh).count} árboles`);
-      }
-    }
 
     viewer.frame(surface.width, surface.depth, surface.minX, surface.maxX, -surface.maxY, -surface.minY, (x, z) =>
       surface.heightAt(x, -z),
@@ -254,8 +253,11 @@ function rebuildBuildings() {
   if (!project) return;
   if (project.buildingsMesh) {
     viewer.content.remove(project.buildingsMesh);
-    project.buildingsMesh.geometry.dispose();
-    for (const m of project.buildingsMesh.material as THREE.Material[]) m.dispose();
+    project.buildingsMesh.traverse((o) => {
+      const m = o as THREE.Mesh;
+      m.geometry?.dispose();
+      for (const mat of [m.material].flat()) (mat as THREE.Material | undefined)?.dispose();
+    });
     project.buildingsMesh = null;
   }
   project.records = [];
@@ -266,7 +268,17 @@ function rebuildBuildings() {
     const c = ringCentroid(b.polygons[0].outer);
     return c.lat >= area.south && c.lat <= area.north && c.lng >= area.west && c.lng <= area.east;
   });
-  const { mesh, records } = buildBuildings(inside, frame, surface, buildingOptions(), overrides, hidden, project.texture, project.facade);
+  const textured = $<HTMLInputElement>("building-textures").checked;
+  const { mesh, records } = buildBuildings(
+    inside,
+    frame,
+    surface,
+    buildingOptions(),
+    overrides,
+    hidden,
+    textured ? project.texture : null,
+    textured ? project.facade : null,
+  );
   project.buildingsMesh = mesh;
   project.records = records;
   if (mesh) viewer.content.add(mesh);
@@ -276,7 +288,7 @@ function rebuildBuildings() {
   viewer.invalidate();
 }
 
-for (const id of ["level-h", "default-h", "auto-roofs"]) $(id).addEventListener("change", () => rebuildBuildings());
+for (const id of ["level-h", "default-h", "auto-roofs", "building-textures"]) $(id).addEventListener("change", () => rebuildBuildings());
 
 function selectBuilding(rec: BuildingRecord | null) {
   const section = $("building-section");

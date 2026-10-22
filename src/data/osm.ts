@@ -37,8 +37,6 @@ export interface OsmData {
   /** Ríos, arroyos y canales dibujados como líneas. */
   waterways: LineFeature[];
   areas: AreaFeature[];
-  /** Árboles sueltos mapeados (natural=tree). */
-  trees: LngLat[];
 }
 
 export function buildOverpassQuery(b: BBox): string {
@@ -52,11 +50,12 @@ export function buildOverpassQuery(b: BBox): string {
   way["highway"](${box});
   way["railway"~"^(rail|light_rail|tram|subway|narrow_gauge)$"](${box});
   way["waterway"~"^(river|stream|canal|drain|ditch)$"](${box});
-  node["natural"="tree"](${box});
   way["natural"~"^(water|wood|scrub|grassland)$"](${box});
   relation["natural"~"^(water|wood)$"](${box});
   relation["landuse"="forest"](${box});
   way["waterway"="riverbank"](${box});
+  way["landuse"~"^(reservoir|basin)$"](${box});
+  relation["landuse"="reservoir"](${box});
   way["landuse"~"^(forest|grass|meadow|park|recreation_ground|village_green|cemetery)$"](${box});
   way["leisure"~"^(park|garden|pitch|golf_course)$"](${box});
 );
@@ -67,8 +66,6 @@ type OverpassGeom = { lat: number; lon: number }[];
 interface OverpassElement {
   type: "node" | "way" | "relation";
   id: number;
-  lat?: number;
-  lon?: number;
   tags?: Tags;
   geometry?: OverpassGeom;
   members?: { type: string; role: string; geometry?: OverpassGeom }[];
@@ -96,7 +93,7 @@ function relationPolygons(el: OverpassElement): Polygon[] {
 }
 
 function areaKind(t: Tags): AreaFeature["kind"] | null {
-  if (t.natural === "water" || t.waterway === "riverbank") return "water";
+  if (t.natural === "water" || t.waterway === "riverbank" || t.landuse === "reservoir" || t.landuse === "basin") return "water";
   if (t.natural === "wood" || t.landuse === "forest") return "forest";
   if (t.natural || t.landuse || t.leisure) return "green";
   return null;
@@ -104,14 +101,11 @@ function areaKind(t: Tags): AreaFeature["kind"] | null {
 
 /** Convierte la respuesta de Overpass en entidades geométricas listas para modelar. */
 export function parseOverpass(json: { elements: OverpassElement[] }): OsmData {
-  const out: OsmData = { buildings: [], roads: [], railways: [], waterways: [], areas: [], trees: [] };
+  const out: OsmData = { buildings: [], roads: [], railways: [], waterways: [], areas: [] };
   for (const el of json.elements) {
     const tags = el.tags ?? {};
     const id = `${el.type}/${el.id}`;
-    if (el.type === "node") {
-      if (tags.natural === "tree" && el.lat !== undefined && el.lon !== undefined) out.trees.push({ lng: el.lon, lat: el.lat });
-      continue;
-    }
+    if (el.type === "node") continue;
     const isBuilding = !!tags.building || !!tags["building:part"];
     if (isBuilding) {
       const polygons = el.type === "relation" ? relationPolygons(el) : closedWayPolygon(el);

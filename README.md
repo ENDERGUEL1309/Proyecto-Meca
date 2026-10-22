@@ -48,12 +48,11 @@ npm run build    # sitio estático en dist/
 - **Relieve**: el DEM global se interpola de forma bicúbica (Catmull–Rom), así que las laderas no muestran las aristas de las celdas de 30 m.
 - **Cielo**: modelo atmosférico (Preetham) con nubes que sigue la posición real del sol. También genera el mapa de entorno (PMREM) que ilumina la escena y se refleja en el agua.
 - **Edificios**:
-  - Los tejados llevan la ortofoto proyectada, así que se ve la cubierta real.
-  - Las fachadas tienen ventanas alineadas con cada planta.
+  - Por defecto se dibujan con colores sólidos (cubierta más oscura que el muro) y aristas marcadas, para que cada volumen se distinga del terreno.
+  - Con «Texturas en edificios», los tejados llevan la ortofoto proyectada y las fachadas tienen ventanas alineadas con cada planta.
   - Hay cubiertas a dos aguas, a cuatro aguas y piramidales cuando lo indica `roof:shape`, y opcionalmente en casas pequeñas.
-- **Agua**: los lagos y esteros tienen una lámina plana con oleaje y reflejos, a la cota de su orilla. Los ríos y canales son cintas.
+- **Agua**: los lagos, esteros y embalses tienen una lámina plana con oleaje y reflejos, a la cota de su orilla. Debajo, el terreno se rebaja 1,5 m para que el ruido del DEM sobre el agua no la tape. Los ríos y canales son cintas.
 - **Vías**: hay asfalto con línea central amarilla y bordes blancos, calles secundarias, aceras, caminos de tierra y vía férrea con traviesas.
-- **Vegetación**: los árboles 3D se instancian (dos llamadas de dibujo para miles de árboles). Salen de los árboles, bosques y parques de OSM, y de la detección de copas por color en la ortofoto, que es verde oscuro (índice ExG). Se excluyen calles, edificios y agua.
 
 ## Arquitectura
 

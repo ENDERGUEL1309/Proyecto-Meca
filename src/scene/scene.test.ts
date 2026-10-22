@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { planRoof } from "./buildings";
-import { treeProbabilityFromPixel } from "./trees";
-import { waterLevel } from "./water";
+import { carveWaterBodies, waterLevel } from "./water";
+import { TerrainSurface } from "./terrainMesh";
 import { bicubic } from "../data/terrain";
 
 const opts = { levelHeight: 3, defaultHeight: 6, autoRoofs: false };
@@ -32,12 +32,13 @@ describe("cubiertas", () => {
   });
 });
 
-describe("vegetación y agua", () => {
-  it("distingue copas de árboles, césped, asfalto y tejados", () => {
-    expect(treeProbabilityFromPixel(45, 75, 35)).toBeGreaterThan(0.5); // copa
-    expect(treeProbabilityFromPixel(120, 160, 80)).toBeLessThan(0.5); // césped claro
-    expect(treeProbabilityFromPixel(90, 90, 92)).toBe(0); // asfalto
-    expect(treeProbabilityFromPixel(200, 120, 100)).toBe(0); // teja
+describe("agua", () => {
+  it("rebaja el terreno solo dentro de la lámina", () => {
+    // rejilla 11×11 de 0 a 100 m, plana a 5 m
+    const s = new TerrainSurface(0, 0, 100, 100, 11, 11, new Float32Array(121).fill(5), 0, 0, 5);
+    carveWaterBodies(s, [{ outer: [[30, 30], [70, 30], [70, 70], [30, 70]], holes: [], level: 4 }]);
+    expect(s.heightAt(50, 50)).toBeCloseTo(2.5);
+    expect(s.heightAt(10, 10)).toBe(5);
   });
 
   it("toma un percentil bajo de la orilla como nivel del agua", () => {

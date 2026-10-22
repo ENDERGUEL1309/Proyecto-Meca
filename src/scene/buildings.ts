@@ -31,7 +31,9 @@ export const FACADE_BAY = 3.5;
 
 const WALL_DEFAULT = new THREE.Color(0xf1ebe0);
 const WALL_ESTIMATED = new THREE.Color(0xdfe3e8);
-const ROOF_DEFAULT = new THREE.Color(0xb7a99a);
+// cubierta algo más oscura que el muro: el volumen se lee bien desde arriba
+const ROOF_DEFAULT = new THREE.Color(0xa59c92);
+const EDGE_COLOR = 0x3a3530;
 const WHITE = new THREE.Color(1, 1, 1);
 
 function tagColor(value: string | undefined, fallback: THREE.Color): THREE.Color {
@@ -144,8 +146,10 @@ export function buildBuildings(
   opts: BuildingOptions,
   overrides: Map<string, HeightOverride>,
   hidden: Set<string>,
+  /** Ortofoto para proyectar en las cubiertas; null = color sólido. */
   roofTexture: THREE.Texture | null,
-  facade: THREE.Texture,
+  /** Textura de ventanas; null = muros lisos. */
+  facade: THREE.Texture | null,
 ): { mesh: THREE.Mesh | null; records: BuildingRecord[] } {
   const roofs = new Tris();
   const walls = new Tris();
@@ -267,7 +271,7 @@ export function buildBuildings(
   geo.addGroup(0, roofs.count * 3, 0);
   geo.addGroup(roofs.count * 3, walls.count * 3, 1);
 
-  facade.repeat.set(1 / FACADE_BAY, 1 / opts.levelHeight);
+  facade?.repeat.set(1 / FACADE_BAY, 1 / opts.levelHeight);
   const roofMat = new THREE.MeshStandardMaterial({ map: roofTexture, vertexColors: true, roughness: 0.9 });
   roofMat.name = "cubiertas";
   const wallMat = new THREE.MeshStandardMaterial({ map: facade, vertexColors: true, roughness: 0.7, metalness: 0.05 });
@@ -276,6 +280,13 @@ export function buildBuildings(
   mesh.name = "edificios";
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  // aristas marcadas (esquinas, aleros, cumbreras): separan cada edificio del fondo
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo, 30),
+    new THREE.LineBasicMaterial({ color: EDGE_COLOR, transparent: true, opacity: 0.45 }),
+  );
+  edges.name = "aristas";
+  mesh.add(edges);
   return { mesh, records };
 }
 
