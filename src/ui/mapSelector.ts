@@ -13,7 +13,7 @@ export class MapSelector {
   onChange: (bbox: BBox | null) => void = () => {};
 
   constructor(el: HTMLElement) {
-    this.map = L.map(el, { zoomControl: true }).setView([40.4168, -3.7038], 15);
+    this.map = L.map(el, { zoomControl: true }).setView([-2.1700, -79.9224], 13) // Guayaquil;
     const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
