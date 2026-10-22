@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planRoof } from "./buildings";
+import { flattenUnderBuildings, isSuspiciousBlock, planRoof } from "./buildings";
+import { LocalFrame } from "../geo/mercator";
 import { carveWaterBodies, waterLevel } from "./water";
 import { TerrainSurface } from "./terrainMesh";
 import { bicubic } from "../data/terrain";
@@ -51,5 +52,78 @@ describe("interpolación bicúbica", () => {
     const d = [0, 1, 2, 3, 1, 2, 3, 4, 2, 3, 4, 5, 3, 4, 5, 6];
     expect(bicubic(d, 4, 4, 1, 1)).toBeCloseTo(2);
     expect(bicubic(d, 4, 4, 1.5, 1.5)).toBeCloseTo(3); // plano inclinado: exacto
+  });
+});
+
+describe("asiento de edificios", () => {
+  const bbox = { south: -0.001, west: -0.001, north: 0.001, east: 0.001 };
+  const frame = new LocalFrame(bbox);
+  const [minX, minY] = frame.toLocal(bbox.west, bbox.south);
+  const [maxX, maxY] = frame.toLocal(bbox.east, bbox.north);
+  const n = 45;
+  const slope = () => {
+    // ladera: sube 0,5 m por metro hacia el este
+    const h = new Float32Array(n * n);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) h[j * n + i] = (i / (n - 1)) * (maxX - minX) * 0.5;
+    return new TerrainSurface(minX, minY, maxX, maxY, n, n, h, 0, 0, 100);
+  };
+  const house = (size: number) => ({
+    id: "way/1",
+    tags: { building: "yes" },
+    polygons: [{ outer: [[-size, -size], [size, -size], [size, size], [-size, size], [-size, -size]].map(([x, y]) => frame.toLngLat(x, y)), holes: [] }],
+    isPart: false,
+  });
+
+  it("excava como mucho 4 m y no toca el terreno lejano", () => {
+    const s = slope();
+    const far = s.heightAt(80, 80);
+    const before = s.heightAt(10, 0);
+    flattenUnderBuildings([house(10)], frame, s);
+    expect(s.heightAt(10, 0)).toBeGreaterThanOrEqual(before - 4 - 1e-3);
+    expect(s.heightAt(10, 0)).toBeLessThan(before);
+    expect(s.heightAt(80, 80)).toBeCloseTo(far);
+  });
+
+  it("eleva la cubierta por encima de lo que sobresale en pendiente", () => {
+    const s = slope();
+    const footings = flattenUnderBuildings([house(10)], frame, s);
+    const f = footings.get("way/1#0")!;
+    // en 20 m de ancho la ladera sube 10 m: más que la excavación permitida
+    expect(f.minTop).toBeGreaterThan(s.heightAt(10, 0));
+    expect(f.ground).toBeLessThan(s.heightAt(10, 0));
+  });
+
+  it("detecta manzanas enteras mapeadas como un solo edificio", () => {
+    const big = { ...house(100), id: "way/2" }; // 200 × 200 m
+    expect(isSuspiciousBlock(big, frame)).toBe(true);
+    expect(isSuspiciousBlock({ ...big, tags: { building: "yes", "building:levels": "2" } }, frame)).toBe(false);
+    expect(isSuspiciousBlock(house(10), frame)).toBe(false);
+  });
+
+  it("detecta manzanas en ladera por el desnivel bajo la planta", () => {
+    const mid = { ...house(30), id: "way/3" }; // 60 × 60 m sobre una ladera de 30 m de desnivel
+    expect(isSuspiciousBlock(mid, frame)).toBe(false);
+    expect(isSuspiciousBlock(mid, frame, slope())).toBe(true);
+  });
+
+  it("ignora un valor anómalo aislado al estimar el suelo", () => {
+    const s = slope();
+    const k = Math.floor(n / 2) * n + Math.floor(n / 2);
+    s.heights[k] = -400;
+    const f = flattenUnderBuildings([house(10)], frame, s).get("way/1#0")!;
+    expect(f.ground).toBeGreaterThan(-50);
+  });
+});
+
+describe("limpieza del DEM", () => {
+  it("acota batimetrías absurdas y elimina picos aislados", async () => {
+    const { cleanElevations } = await import("./terrainMesh");
+    const n = 5;
+    const h = new Float32Array(n * n).fill(10);
+    h[12] = 300; // pico
+    h[0] = -424; // batimetría errónea
+    cleanElevations(h, n, n);
+    expect(h[12]).toBe(10);
+    expect(h[0]).toBeGreaterThanOrEqual(-25);
   });
 });

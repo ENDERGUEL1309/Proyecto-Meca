@@ -150,6 +150,8 @@ export function buildBuildings(
   roofTexture: THREE.Texture | null,
   /** Textura de ventanas; null = muros lisos. */
   facade: THREE.Texture | null,
+  /** Asientos calculados por flattenUnderBuildings; sin ellos se usa la cota mínima de la planta. */
+  footings?: Footings,
 ): { mesh: THREE.Mesh | null; records: BuildingRecord[] } {
   const roofs = new Tris();
   const walls = new Tris();
@@ -172,14 +174,19 @@ export function buildBuildings(
     const roofStart = roofs.count;
     const wallStart = walls.count;
 
-    for (const poly of f.polygons) {
+    for (const [index, poly] of f.polygons.entries()) {
       const outer = openRing(poly.outer).map((p) => frame.toLocal(p.lng, p.lat));
       if (outer.length < 3) continue;
-      // asentar en el punto más bajo del terreno bajo la planta: nunca queda flotando
-      let ground = Infinity;
-      for (const [x, y] of outer) ground = Math.min(ground, surface.heightAt(x, y));
-      const bottom = ground + height.min;
+      const footing = footings?.get(footingKey(f.id, index));
+      // cota más baja del terreno bajo el contorno (tras explanar también a los vecinos)
+      let lowest = Infinity;
+      for (const [x, y] of outer) lowest = Math.min(lowest, surface.heightAt(x, y));
+      const ground = footing?.ground ?? lowest;
+      // la base baja hasta el terreno más bajo del contorno: sin rendijas en pendiente
+      const bottom = height.min > 0 ? ground + height.min : Math.min(ground, lowest) - 0.5;
+      // si el terreno sobresale por encima de la altura nominal, el edificio se eleva (con tope)
       let top = ground + height.max;
+      if (footing) top = Math.max(top, Math.min(footing.minTop, top + MAX_RAISE));
       const roof = planRoof(f.tags, outer, height.source, opts);
       let eave = top;
       if (roof.type !== "flat") {
@@ -288,6 +295,149 @@ export function buildBuildings(
   edges.name = "aristas";
   mesh.add(edges);
   return { mesh, records };
+}
+
+function inRing(x: number, y: number, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function distToRing(x: number, y: number, ring: [number, number][]): number {
+  let best = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [ax, ay] = ring[j];
+    const [bx, by] = ring[i];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2));
+    best = Math.min(best, Math.hypot(x - ax - t * dx, y - ay - t * dy));
+  }
+  return best;
+}
+
+/** Profundidad máxima que se excava el terreno bajo un edificio, en metros. */
+const MAX_CUT = 4;
+/** Elevación máxima de la cubierta para salvar la pendiente, en metros. */
+const MAX_RAISE = 6;
+/** Planta a partir de la cual un `building=yes` sin datos se trata como error de mapeo. */
+const SUSPICIOUS_AREA = 15000;
+/** Desnivel bajo la planta que delata una manzana en ladera mapeada como un solo edificio. */
+const SUSPICIOUS_RELIEF = 10;
+
+/**
+ * Polígonos etiquetados solo como edificio genérico, sin altura ni plantas, que
+ * son enormes o grandes y cruzan mucho desnivel: casi siempre son manzanas o
+ * barrios enteros mapeados como un único edificio.
+ */
+export function isSuspiciousBlock(f: BuildingFeature, frame: LocalFrame, surface?: TerrainSurface): boolean {
+  const t = f.tags;
+  if (t.height || t["building:levels"] || t.name) return false;
+  if (!["yes", "residential", "house"].includes(t.building ?? t["building:part"] ?? "")) return false;
+  const rings = f.polygons.map((p) => openRing(p.outer).map((q) => frame.toLocal(q.lng, q.lat)));
+  const area = rings.reduce((s, r) => s + ringArea(r), 0);
+  if (area > SUSPICIOUS_AREA) return true;
+  if (!surface || area < 2000) return false;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const r of rings) {
+    for (const [x, y] of r) {
+      const h = surface.heightAt(x, y);
+      lo = Math.min(lo, h);
+      hi = Math.max(hi, h);
+    }
+  }
+  return hi - lo > SUSPICIOUS_RELIEF;
+}
+/** Por encima de esta superficie (m²) no se excava: naves, centros comerciales… */
+const MAX_CUT_AREA = 8000;
+
+/** Asiento de cada polígono de edificio: cota del suelo y altura extra necesaria. */
+export interface Footing {
+  ground: number;
+  /** Cota mínima de la cubierta para que el terreno no la atraviese. */
+  minTop: number;
+}
+
+export type Footings = Map<string, Footing>;
+
+const footingKey = (id: string, polygon: number) => `${id}#${polygon}`;
+
+function percentile(values: number[], p: number): number {
+  const v = [...values].sort((x, y) => x - y);
+  return v[Math.min(v.length - 1, Math.floor(v.length * p))];
+}
+
+/**
+ * Asienta cada edificio en el terreno y lo explana a su alrededor.
+ *
+ * Los DEM globales (SRTM) son modelos de superficie: en ciudades y bosques
+ * incluyen techos y copas, así que las casas quedan "enterradas" en su propio
+ * relieve, y en pendiente el lado alto atraviesa el tejado. Para cada planta:
+ * 1. el suelo es un percentil bajo de las cotas de la planta y su entorno
+ *    (calles, patios), robusto frente a valores anómalos;
+ * 2. el terreno de la planta y un margen se rebaja hacia ese suelo, como una
+ *    excavación, pero como mucho MAX_CUT metros (sin fosos ni acantilados);
+ * 3. lo que siga sobresaliendo fija una cota mínima de cubierta: el edificio
+ *    se eleva, como las casas de ladera escalonadas.
+ */
+export function flattenUnderBuildings(features: BuildingFeature[], frame: LocalFrame, surface: TerrainSurface): Footings {
+  const footings: Footings = new Map();
+  const { cols, rows, heights } = surface;
+  const dx = surface.width / (cols - 1);
+  const dy = surface.depth / (rows - 1);
+  const margin = 1.5 * Math.max(dx, dy);
+  const context = Math.max(6, 2 * margin); // entorno para estimar la cota de la calle
+  for (const f of features) {
+    f.polygons.forEach((poly, index) => {
+      const ring = openRing(poly.outer).map((p) => frame.toLocal(p.lng, p.lat));
+      if (ring.length < 3) return;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const [x, y] of ring) {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+      const i0 = Math.max(0, Math.floor((minX - context - surface.minX) / dx));
+      const i1 = Math.min(cols - 1, Math.ceil((maxX + context - surface.minX) / dx));
+      const j0 = Math.max(0, Math.floor((surface.maxY - maxY - context) / dy));
+      const j1 = Math.min(rows - 1, Math.ceil((surface.maxY - minY + context) / dy));
+      const samples = ring.map(([x, y]) => surface.heightAt(x, y));
+      const near: number[] = [];
+      const cut: number[] = [];
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const x = surface.minX + i * dx;
+          const y = surface.maxY - j * dy;
+          const k = j * cols + i;
+          const inside = inRing(x, y, ring);
+          const dist = inside ? 0 : distToRing(x, y, ring);
+          if (dist <= context) near.push(heights[k]);
+          if (inside) samples.push(heights[k]);
+          if (dist <= margin) cut.push(k);
+        }
+      }
+      const ground = Math.min(percentile(samples, 0.2), percentile(near.length ? near : samples, 0.2));
+      if (ringArea(ring) <= MAX_CUT_AREA) {
+        for (const k of cut) heights[k] = Math.max(Math.min(heights[k], ground), heights[k] - MAX_CUT);
+      }
+      const large = ringArea(ring) > MAX_CUT_AREA;
+      let highest = -Infinity;
+      for (const [x, y] of ring) highest = Math.max(highest, surface.heightAt(x, y));
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          if (inRing(surface.minX + i * dx, surface.maxY - j * dy, ring)) highest = Math.max(highest, heights[j * cols + i]);
+        }
+      }
+      // los edificios muy grandes no se elevan: su planta cruza demasiado relieve
+      footings.set(footingKey(f.id, index), { ground, minTop: large ? -Infinity : highest + 1 });
+    });
+  }
+  return footings;
 }
 
 /** Busca el edificio al que pertenece un triángulo (búsqueda binaria sobre los rangos). */

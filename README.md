@@ -41,7 +41,12 @@ npm run build    # sitio estático en dist/
 4. `min_height` / `building:min_level` elevan la base (voladizos, pasarelas).
 5. Cuando hay `building:part`, el contorno general no se extruye; se dibujan las partes.
 6. Se usan los colores `building:colour` / `roof:colour` cuando están etiquetados.
-7. La base del edificio se asienta en la cota más baja del terreno bajo su planta, así que nunca queda flotando en pendiente.
+7. **Asiento en el terreno.** Los DEM globales (SRTM) son modelos de *superficie*: en ciudades y bosques incluyen techos y copas, y las casas quedarían enterradas en su propio relieve. Por eso, para cada edificio:
+   - el suelo es un percentil bajo de las cotas de la planta y su entorno (calles, patios), robusto frente a valores anómalos;
+   - el terreno de la planta y un margen se rebaja hacia ese suelo, como una excavación, con un máximo de 4 m (sin fosos ni acantilados);
+   - si en pendiente el terreno sigue por encima, el edificio se eleva hasta 6 m, como las casas de ladera escalonadas.
+8. Se omiten los polígonos `building=yes` sin altura que son enormes (> 15.000 m²) o que cruzan más de 10 m de desnivel: casi siempre son manzanas enteras mapeadas como un solo edificio.
+9. El DEM se limpia antes de usarlo: se acota la batimetría absurda de ríos y estuarios (p. ej. −424 m en el Guayas) y se eliminan los picos aislados.
 
 ## Realismo de la escena
 

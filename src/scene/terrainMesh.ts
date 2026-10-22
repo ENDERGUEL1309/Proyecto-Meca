@@ -56,6 +56,48 @@ export class TerrainSurface {
   }
 }
 
+/** Salto máximo (m) respecto a los vecinos antes de considerar un valor como pico erróneo. */
+const SPIKE_THRESHOLD = 20;
+/** Profundidad máxima (m) que se conserva bajo el nivel del mar en zonas de tierra. */
+const MAX_DEPTH = 25;
+
+function median(values: number[]): number {
+  const v = values.filter(Number.isFinite).sort((a, b) => a - b);
+  return v.length ? v[Math.floor(v.length / 2)] : NaN;
+}
+
+/**
+ * Limpia artefactos típicos de los DEM globales:
+ * - batimetría de baja resolución en ríos y estuarios (p. ej. −424 m en el Guayas):
+ *   se acota la profundidad salvo que la zona entera esté bajo el nivel del mar;
+ * - picos o pozos aislados: se sustituyen por la mediana de sus 8 vecinos.
+ */
+export function cleanElevations(h: Float32Array, cols: number, rows: number) {
+  const sample: number[] = [];
+  for (let k = 0; k < h.length; k += Math.max(1, Math.floor(h.length / 4000))) sample.push(h[k]);
+  if (median(sample) > -MAX_DEPTH) {
+    for (let k = 0; k < h.length; k++) if (h[k] < -MAX_DEPTH) h[k] = -MAX_DEPTH;
+  }
+  const src = h.slice();
+  const nb: number[] = [];
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      nb.length = 0;
+      for (let dj = -1; dj <= 1; dj++) {
+        for (let di = -1; di <= 1; di++) {
+          if (!di && !dj) continue;
+          const x = i + di;
+          const y = j + dj;
+          if (x >= 0 && y >= 0 && x < cols && y < rows) nb.push(src[y * cols + x]);
+        }
+      }
+      const m = median(nb);
+      const k = j * cols + i;
+      if (!Number.isFinite(src[k]) || Math.abs(src[k] - m) > SPIKE_THRESHOLD) h[k] = m;
+    }
+  }
+}
+
 /** Muestrea la elevación en una rejilla regular sobre la zona. */
 export function sampleSurface(bbox: BBox, frame: LocalFrame, sampler: ElevationSampler, maxSegments = 512): TerrainSurface {
   const [minX, minY] = frame.toLocal(bbox.west, bbox.south);
@@ -67,19 +109,21 @@ export function sampleSurface(bbox: BBox, frame: LocalFrame, sampler: ElevationS
   const cols = Math.max(2, Math.round(w / cell) + 1);
   const rows = Math.max(2, Math.round(d / cell) + 1);
   const raw = new Float32Array(cols * rows);
-  let min = Infinity;
-  let max = -Infinity;
   for (let j = 0; j < rows; j++) {
     const north = maxY - (j / (rows - 1)) * d;
     for (let i = 0; i < cols; i++) {
       const east = minX + (i / (cols - 1)) * w;
       const ll = frame.toLngLat(east, north);
-      let v = sampler.elevation(ll.lng, ll.lat);
-      if (!Number.isFinite(v)) v = NaN;
-      raw[j * cols + i] = v;
-      if (v < min) min = v;
-      if (v > max) max = v;
+      const v = sampler.elevation(ll.lng, ll.lat);
+      raw[j * cols + i] = Number.isFinite(v) ? v : NaN;
     }
+  }
+  cleanElevations(raw, cols, rows);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of raw) {
+    if (v < min) min = v;
+    if (v > max) max = v;
   }
   if (!Number.isFinite(min)) {
     min = 0;

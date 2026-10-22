@@ -7,10 +7,10 @@ import { sunPosition } from "./geo/sun";
 import { fetchTerrariumGrid, LayeredSampler, type ElevationSampler } from "./data/terrain";
 import { loadGeoTiffDem } from "./data/geotiff";
 import { fetchImagery, IMAGERY_SOURCES } from "./data/imagery";
-import { fetchOsm, type OsmData } from "./data/osm";
+import { fetchOsm, type BuildingFeature, type OsmData } from "./data/osm";
 import { Viewer } from "./scene/viewer";
 import { buildTerrainMesh, sampleSurface, type TerrainSurface } from "./scene/terrainMesh";
-import { buildBuildings, recordForFace, type BuildingOptions, type BuildingRecord, type HeightOverride } from "./scene/buildings";
+import { buildBuildings, flattenUnderBuildings, isSuspiciousBlock, recordForFace, type Footings, type BuildingOptions, type BuildingRecord, type HeightOverride } from "./scene/buildings";
 import { buildRoads } from "./scene/roads";
 import { buildWater, carveWaterBodies, waterBodies } from "./scene/water";
 import { facadeTexture } from "./scene/textures";
@@ -48,6 +48,9 @@ interface Project {
   /** Textura del terreno, reutilizada para proyectar la ortofoto en las cubiertas. */
   texture: THREE.Texture | null;
   facade: THREE.Texture | null;
+  footings?: Footings;
+  /** Edificios a modelar, fijados al generar (antes de explanar el terreno). */
+  buildings: BuildingFeature[];
 }
 
 let bbox: BBox | null = null;
@@ -211,6 +214,8 @@ async function generate() {
     const wantWater = !!osm && $<HTMLInputElement>("with-water").checked;
     const bodies = wantWater ? waterBodies(osm!.areas, frame, surface) : [];
     carveWaterBodies(surface, bodies);
+    const buildings = osm ? buildingsInside(osm, area, frame, surface) : [];
+    const footings = $<HTMLInputElement>("with-buildings").checked ? flattenUnderBuildings(buildings, frame, surface) : undefined;
 
     viewer.clearContent();
     clearUserLists();
@@ -218,7 +223,7 @@ async function generate() {
     viewer.content.add(terrain);
     viewer.helpers.add(selectionBox);
 
-    project = { bbox: area, frame, surface, osm, buildingsMesh: null, records: [], terrain, texture, facade: facadeTexture() };
+    project = { bbox: area, frame, surface, osm, buildingsMesh: null, records: [], terrain, texture, facade: facadeTexture(), footings, buildings };
     if (osm && $<HTMLInputElement>("with-roads").checked) {
       const roads = buildRoads(osm.roads, osm.railways, frame, surface);
       if (roads) viewer.content.add(roads);
@@ -249,6 +254,23 @@ async function generate() {
 
 /* ---------- Edificios ---------- */
 
+/**
+ * Edificios a modelar: los que tienen el centro dentro de la zona (evita piezas
+ * colgando del borde), sin los polígonos que son manzanas enteras mal mapeadas.
+ */
+function buildingsInside(osm: OsmData, area: BBox, frame: LocalFrame, surface: TerrainSurface) {
+  const kept: BuildingFeature[] = [];
+  let skipped = 0;
+  for (const b of osm.buildings) {
+    const c = ringCentroid(b.polygons[0].outer);
+    if (c.lat < area.south || c.lat > area.north || c.lng < area.west || c.lng > area.east) continue;
+    if (isSuspiciousBlock(b, frame, surface)) skipped++;
+    else kept.push(b);
+  }
+  if (skipped) log(`Edificios: ${skipped} polígonos omitidos (manzanas enteras mapeadas como un solo edificio, sin altura)`);
+  return kept;
+}
+
 function rebuildBuildings() {
   if (!project) return;
   if (project.buildingsMesh) {
@@ -262,12 +284,8 @@ function rebuildBuildings() {
   }
   project.records = [];
   if (!project.osm || !$<HTMLInputElement>("with-buildings").checked) return;
-  const { frame, surface, bbox: area } = project;
-  // solo edificios cuyo centro cae dentro de la zona (evita piezas colgando del borde)
-  const inside = project.osm.buildings.filter((b) => {
-    const c = ringCentroid(b.polygons[0].outer);
-    return c.lat >= area.south && c.lat <= area.north && c.lng >= area.west && c.lng <= area.east;
-  });
+  const { frame, surface } = project;
+  const inside = project.buildings;
   const textured = $<HTMLInputElement>("building-textures").checked;
   const { mesh, records } = buildBuildings(
     inside,
@@ -278,6 +296,7 @@ function rebuildBuildings() {
     hidden,
     textured ? project.texture : null,
     textured ? project.facade : null,
+    project.footings,
   );
   project.buildingsMesh = mesh;
   project.records = records;
