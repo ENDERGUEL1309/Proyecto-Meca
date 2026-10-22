@@ -30,15 +30,18 @@ export class MapSelector {
     L.control.layers({ Mapa: osm, "Satélite": sat, "Topográfico": topo }).addTo(this.map);
     this.photoLayer.addTo(this.map);
 
-    this.map.on("mousedown", (e: L.LeafletMouseEvent) => {
+    // eventos de puntero: sirven igual para ratón, dedo y lápiz
+    const container = this.map.getContainer();
+    container.addEventListener("pointerdown", (e) => {
       if (!this.drawing) return;
-      this.start = e.latlng;
-      this.setRect(L.latLngBounds(e.latlng, e.latlng));
+      container.setPointerCapture(e.pointerId);
+      this.start = this.map.mouseEventToLatLng(e);
+      this.setRect(L.latLngBounds(this.start, this.start));
     });
-    this.map.on("mousemove", (e: L.LeafletMouseEvent) => {
-      if (this.drawing && this.start) this.setRect(L.latLngBounds(this.start, e.latlng));
+    container.addEventListener("pointermove", (e) => {
+      if (this.drawing && this.start) this.setRect(L.latLngBounds(this.start, this.map.mouseEventToLatLng(e)));
     });
-    this.map.on("mouseup", () => {
+    container.addEventListener("pointerup", () => {
       if (!this.drawing || !this.start) return;
       this.stopDrawing();
       this.emit();
@@ -49,6 +52,7 @@ export class MapSelector {
     this.drawing = true;
     this.start = null;
     this.map.dragging.disable();
+    this.map.touchZoom.disable();
     this.map.getContainer().classList.add("drawing");
   }
 
@@ -56,6 +60,7 @@ export class MapSelector {
     this.drawing = false;
     this.start = null;
     this.map.dragging.enable();
+    this.map.touchZoom.enable();
     this.map.getContainer().classList.remove("drawing");
   }
 

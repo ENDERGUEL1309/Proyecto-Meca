@@ -30,6 +30,8 @@ import { MapSelector, describeBBox, escapeHtml } from "./ui/mapSelector";
 const WARN_KM2 = 4;
 const MAX_KM2 = 16;
 
+const isTouch = window.matchMedia("(pointer: coarse)").matches;
+
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 /* ---------- Estado ---------- */
@@ -109,7 +111,7 @@ selector.onChange = (b) => {
 $("draw").addEventListener("click", () => {
   showView("map");
   selector.startDrawing();
-  hint("Arrastra sobre el mapa para marcar la zona");
+  hint(isTouch ? "Arrastra con el dedo sobre el mapa para marcar la zona" : "Arrastra sobre el mapa para marcar la zona");
 });
 $("use-view").addEventListener("click", () => selector.useView());
 $("search-form").addEventListener("submit", async (e) => {
@@ -214,7 +216,11 @@ async function generate() {
     updateSun();
     for (const id of ["user-section", "sun-section", "export-section"]) $(id).classList.remove("disabled");
     showView("three");
-    hint("Arrastra: mover · Clic derecho / Ctrl: girar · Rueda: zoom · Clic en un edificio: editar");
+    hint(
+      isTouch
+        ? "1 dedo: mover · 2 dedos: girar y zoom · Toca un edificio para editarlo"
+        : "Arrastra: mover · Clic derecho / Ctrl: girar · Rueda: zoom · Clic en un edificio: editar",
+    );
     log("Listo.");
   } finally {
     btn.disabled = false;
