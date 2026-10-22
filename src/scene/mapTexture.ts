@@ -40,7 +40,7 @@ export function paintMapTexture(osm: OsmData, frame: LocalFrame, surface: Terrai
       ringPath(poly.outer);
       poly.holes.forEach(ringPath);
     }
-    ctx.fillStyle = a.kind === "water" ? "#9cc3e0" : "#c4d9a6";
+    ctx.fillStyle = a.kind === "water" ? "#9cc3e0" : a.kind === "forest" ? "#a9c78c" : "#c4d9a6";
     ctx.fill("evenodd");
   }
 

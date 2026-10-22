@@ -60,7 +60,16 @@ main { flex: 1; position: relative; display: flex; flex-direction: column; min-w
 #hint { margin-left: 8px; }
 .view { flex: 1; display: none; min-height: 0; }
 .view.active { display: block; }
-#three canvas { display: block; width: 100%; height: 100%; }
+#three { position: relative; }
+#three canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+#view-tools {
+  position: absolute; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 5;
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+}
+#view-tools button {
+  background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(6px);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25); min-width: 44px; min-height: 40px; font-weight: 600;
+}
 #three.placing canvas { cursor: crosshair; }
 .leaflet-container.drawing { cursor: crosshair; }
 .leaflet-container.drawing { touch-action: none; }
@@ -80,4 +89,8 @@ main { flex: 1; position: relative; display: flex; flex-direction: column; min-w
   /* iOS amplía la página al enfocar campos con letra menor de 16 px */
   input, select, button { font-size: 16px; }
   .card label, .card { font-size: 14px; }
+  /* controles de cámara compactos: una fila de iconos que no tapa el modelo */
+  #view-tools { flex-direction: row; right: 8px; bottom: 8px; gap: 4px; }
+  #view-tools button { min-width: 40px; min-height: 40px; padding: 4px; font-size: 18px; line-height: 1; }
+  #view-tools button span { display: none; }
 }

@@ -19,8 +19,9 @@ npm run build    # sitio estático en dist/
    - **Planos / mapeos previos** (imagen): se drapean sobre el relieve y se ajustan con desplazamiento, ancho, giro y opacidad.
    - **Fotos de campo**: si traen GPS en EXIF se colocan solas, y si traen `GPSImgDirection` se orientan hacia donde miraba la cámara. Si no tienen GPS, las colocas con un clic.
    - **Modelos 3D** (GLB/glTF de fotogrametría, BIM, SketchUp, Blender…): se apoyan en el terreno y se ajustan con giro, escala y elevación.
-6. **Sol y sombras**: eliges fecha y hora y el sol se coloca en su posición astronómica real, útil para estudios de soleamiento.
-7. **Exportar**: GLB con terreno, zócalo, edificios, vías y modelos importados. La georreferencia (origen lat/lng/cota y bbox) va en `extras` del nodo raíz. También hay captura PNG.
+6. **Navegar**: arrastra para mover, clic derecho o dos dedos para girar, rueda o pellizco para el zoom. El punto de giro no sale de la zona y la cámara no atraviesa el terreno. Los botones de la esquina sirven para centrar, ver desde arriba, acercar y alejar.
+7. **Sol y sombras**: eliges fecha y hora y el sol se coloca en su posición astronómica real, útil para estudios de soleamiento.
+8. **Exportar**: GLB con terreno, zócalo, edificios, vías y modelos importados. La georreferencia (origen lat/lng/cota y bbox) va en `extras` del nodo raíz. También hay captura PNG.
 
 ## Fuentes de datos
 
@@ -41,6 +42,18 @@ npm run build    # sitio estático en dist/
 5. Cuando hay `building:part`, el contorno general no se extruye; se dibujan las partes.
 6. Se usan los colores `building:colour` / `roof:colour` cuando están etiquetados.
 7. La base del edificio se asienta en la cota más baja del terreno bajo su planta, así que nunca queda flotando en pendiente.
+
+## Realismo de la escena
+
+- **Relieve**: el DEM global se interpola de forma bicúbica (Catmull–Rom), así que las laderas no muestran las aristas de las celdas de 30 m.
+- **Cielo**: modelo atmosférico (Preetham) con nubes que sigue la posición real del sol. También genera el mapa de entorno (PMREM) que ilumina la escena y se refleja en el agua.
+- **Edificios**:
+  - Los tejados llevan la ortofoto proyectada, así que se ve la cubierta real.
+  - Las fachadas tienen ventanas alineadas con cada planta.
+  - Hay cubiertas a dos aguas, a cuatro aguas y piramidales cuando lo indica `roof:shape`, y opcionalmente en casas pequeñas.
+- **Agua**: los lagos y esteros tienen una lámina plana con oleaje y reflejos, a la cota de su orilla. Los ríos y canales son cintas.
+- **Vías**: hay asfalto con línea central amarilla y bordes blancos, calles secundarias, aceras, caminos de tierra y vía férrea con traviesas.
+- **Vegetación**: los árboles 3D se instancian (dos llamadas de dibujo para miles de árboles). Salen de los árboles, bosques y parques de OSM, y de la detección de copas por color en la ortofoto, que es verde oscuro (índice ExG). Se excluyen calles, edificios y agua.
 
 ## Arquitectura
 
@@ -69,7 +82,8 @@ src/
 
 ## Hoja de ruta
 
-- **Cubiertas** según `roof:shape` (a dos aguas, a cuatro aguas, piramidal, cúpula).
+- Más formas de cubierta (cúpula, mansarda, *skillion*) y esqueleto recto para plantas no rectangulares.
+- Mar y costa (`natural=coastline`) y agua animada.
 - **Fotogrametría desde fotos del usuario**: fotos → nube de puntos o malla con un servicio aparte (OpenDroneMap / COLMAP) o con *Gaussian Splatting*, y vuelta al visor como GLB o 3D Tiles. Hoy ya se pueden importar GLB generados con Polycam, RealityScan o Meshroom.
 - **Planos en PDF/DXF** (pdf.js, dxf-parser) y georreferenciación por puntos de control en lugar de solo deslizadores.
 - **Ortofoto propia** (GeoTIFF RGB de dron) como textura.

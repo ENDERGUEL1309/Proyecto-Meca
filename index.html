@@ -45,6 +45,9 @@
         </select>
         <label class="check"><input id="with-buildings" type="checkbox" checked /> Edificios (OpenStreetMap)</label>
         <label class="check"><input id="with-roads" type="checkbox" checked /> Vías y ferrocarril</label>
+        <label class="check"><input id="with-water" type="checkbox" checked /> Agua (lagos, esteros, ríos)</label>
+        <label class="check"><input id="with-trees" type="checkbox" checked /> Árboles 3D (OSM + imagen satelital)</label>
+        <label class="check"><input id="auto-roofs" type="checkbox" /> Cubiertas inclinadas estimadas en casas</label>
         <div class="grid2">
           <label>Altura por planta (m)<input id="level-h" type="number" value="3" min="2" max="6" step="0.1" /></label>
           <label>Altura sin datos (m)<input id="default-h" type="number" value="6" min="2" max="60" step="0.5" /></label>
@@ -99,7 +102,14 @@
         <span id="hint" class="muted small"></span>
       </nav>
       <div id="map" class="view active"></div>
-      <div id="three" class="view"></div>
+      <div id="three" class="view">
+        <div id="view-tools" aria-label="Controles de cámara">
+          <button id="cam-home" title="Volver a centrar la vista" aria-label="Centrar">⌖<span> Centrar</span></button>
+          <button id="cam-top" title="Vista desde arriba, con el norte arriba" aria-label="Vista superior">⬒<span> Superior</span></button>
+          <button id="cam-in" title="Acercar" aria-label="Acercar">＋</button>
+          <button id="cam-out" title="Alejar" aria-label="Alejar">－</button>
+        </div>
+      </div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

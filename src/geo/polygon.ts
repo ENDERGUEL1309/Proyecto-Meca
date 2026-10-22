@@ -143,3 +143,109 @@ export function clipPolyline(pts: [number, number][], r: Rect): [number, number]
   }
   return runs.filter((run) => run.length >= 2);
 }
+
+/** Recorta un anillo (en coordenadas locales) a un rectángulo: Sutherland–Hodgman. */
+export function clipRing(ring: [number, number][], r: Rect): [number, number][] {
+  const edges: [(p: [number, number]) => boolean, (a: [number, number], b: [number, number]) => [number, number]][] = [
+    [(p) => p[0] >= r.minX, (a, b) => lerpAt(a, b, 0, r.minX)],
+    [(p) => p[0] <= r.maxX, (a, b) => lerpAt(a, b, 0, r.maxX)],
+    [(p) => p[1] >= r.minY, (a, b) => lerpAt(a, b, 1, r.minY)],
+    [(p) => p[1] <= r.maxY, (a, b) => lerpAt(a, b, 1, r.maxY)],
+  ];
+  let out = ring;
+  for (const [inside, cut] of edges) {
+    const input = out;
+    out = [];
+    for (let i = 0; i < input.length; i++) {
+      const cur = input[i];
+      const prev = input[(i + input.length - 1) % input.length];
+      if (inside(cur)) {
+        if (!inside(prev)) out.push(cut(prev, cur));
+        out.push(cur);
+      } else if (inside(prev)) {
+        out.push(cut(prev, cur));
+      }
+    }
+    if (!out.length) break;
+  }
+  return out;
+}
+
+function lerpAt(a: [number, number], b: [number, number], axis: 0 | 1, value: number): [number, number] {
+  const t = (value - a[axis]) / (b[axis] - a[axis]);
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+}
+
+export function ringArea(ring: [number, number][]): number {
+  let a = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const p = ring[i];
+    const q = ring[(i + 1) % ring.length];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return Math.abs(a) / 2;
+}
+
+/** Envolvente convexa (cadena monótona de Andrew). */
+export function convexHull(points: [number, number][]): [number, number][] {
+  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (pts.length < 3) return pts;
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: [number, number][] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: [number, number][] = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+
+export interface OrientedRect {
+  center: [number, number];
+  /** Vector unitario del lado largo. */
+  axis: [number, number];
+  length: number;
+  width: number;
+}
+
+/** Rectángulo orientado de área mínima (calibres rotatorios sobre la envolvente). */
+export function minAreaRect(points: [number, number][]): OrientedRect | null {
+  const hull = convexHull(points);
+  if (hull.length < 3) return null;
+  let best: OrientedRect | null = null;
+  let bestArea = Infinity;
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % hull.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len < 1e-9) continue;
+    const ux = (b[0] - a[0]) / len;
+    const uy = (b[1] - a[1]) / len;
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+    for (const p of hull) {
+      const u = p[0] * ux + p[1] * uy;
+      const v = -p[0] * uy + p[1] * ux;
+      minU = Math.min(minU, u); maxU = Math.max(maxU, u);
+      minV = Math.min(minV, v); maxV = Math.max(maxV, v);
+    }
+    const area = (maxU - minU) * (maxV - minV);
+    if (area < bestArea) {
+      bestArea = area;
+      const cu = (minU + maxU) / 2;
+      const cv = (minV + maxV) / 2;
+      const center: [number, number] = [cu * ux - cv * uy, cu * uy + cv * ux];
+      const du = maxU - minU;
+      const dv = maxV - minV;
+      best = du >= dv
+        ? { center, axis: [ux, uy], length: du, width: dv }
+        : { center, axis: [-uy, ux], length: dv, width: du };
+    }
+  }
+  return best;
+}

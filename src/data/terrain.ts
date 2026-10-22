@@ -24,8 +24,31 @@ export class MercatorGrid implements ElevationSampler {
     // centros de píxel
     const px = ((m.x - minX) / (maxX - minX)) * this.width - 0.5;
     const py = ((maxY - m.y) / (maxY - minY)) * this.height - 0.5;
-    return bilinear(this.data, this.width, this.height, px, py);
+    return bicubic(this.data, this.width, this.height, px, py);
   }
+}
+
+/**
+ * Interpolación bicúbica (Catmull–Rom) sobre 4×4 píxeles. Con DEM de ~30 m
+ * remuestreados a pocos metros, evita las aristas rectas que deja la bilineal
+ * en cada celda y da laderas continuas.
+ */
+export function bicubic(data: ArrayLike<number>, w: number, h: number, px: number, py: number): number {
+  if (px < -0.5 || py < -0.5 || px > w - 0.5 || py > h - 0.5) return NaN;
+  const x = Math.min(Math.max(px, 0), w - 1);
+  const y = Math.min(Math.max(py, 0), h - 1);
+  const x1 = Math.floor(x);
+  const y1 = Math.floor(y);
+  const tx = x - x1;
+  const ty = y - y1;
+  const at = (i: number, j: number) => data[Math.min(Math.max(j, 0), h - 1) * w + Math.min(Math.max(i, 0), w - 1)];
+  const cr = (p0: number, p1: number, p2: number, p3: number, t: number) =>
+    p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
+  const rows: number[] = [];
+  for (let j = -1; j <= 2; j++) {
+    rows.push(cr(at(x1 - 1, y1 + j), at(x1, y1 + j), at(x1 + 1, y1 + j), at(x1 + 2, y1 + j), tx));
+  }
+  return cr(rows[0], rows[1], rows[2], rows[3], ty);
 }
 
 export function bilinear(data: ArrayLike<number>, w: number, h: number, px: number, py: number): number {

@@ -8,11 +8,13 @@ import { fetchTerrariumGrid, LayeredSampler, type ElevationSampler } from "./dat
 import { loadGeoTiffDem } from "./data/geotiff";
 import { fetchImagery, IMAGERY_SOURCES } from "./data/imagery";
 import { fetchOsm, type OsmData } from "./data/osm";
-import type { HeightOptions } from "./data/heights";
 import { Viewer } from "./scene/viewer";
 import { buildTerrainMesh, sampleSurface, type TerrainSurface } from "./scene/terrainMesh";
-import { buildBuildings, recordForFace, type BuildingRecord, type HeightOverride } from "./scene/buildings";
+import { buildBuildings, recordForFace, type BuildingOptions, type BuildingRecord, type HeightOverride } from "./scene/buildings";
 import { buildRoads } from "./scene/roads";
+import { buildWater } from "./scene/water";
+import { buildTrees } from "./scene/trees";
+import { facadeTexture } from "./scene/textures";
 import { paintMapTexture } from "./scene/mapTexture";
 import {
   PlanOverlay,
@@ -44,6 +46,9 @@ interface Project {
   buildingsMesh: THREE.Mesh | null;
   records: BuildingRecord[];
   terrain: THREE.Group;
+  /** Textura del terreno, reutilizada para proyectar la ortofoto en las cubiertas. */
+  texture: THREE.Texture | null;
+  facade: THREE.Texture;
 }
 
 let bbox: BBox | null = null;
@@ -59,6 +64,8 @@ let abort: AbortController | null = null;
 
 const selector = new MapSelector($("map"));
 const viewer = new Viewer($("three"));
+// ?debug expone el visor en la consola para inspeccionar la escena
+if (new URLSearchParams(location.search).has("debug")) Object.assign(window, { meca: { viewer } });
 const selectionBox = new THREE.BoxHelper(new THREE.Object3D(), 0xff5a36);
 selectionBox.visible = false;
 
@@ -141,8 +148,9 @@ $<HTMLInputElement>("dem-file").addEventListener("change", async (e) => {
   }
 });
 
-function heightOptions(): HeightOptions {
+function buildingOptions(): BuildingOptions {
   return {
+    autoRoofs: $<HTMLInputElement>("auto-roofs").checked,
     levelHeight: parseFloat($<HTMLInputElement>("level-h").value) || 3,
     defaultHeight: parseFloat($<HTMLInputElement>("default-h").value) || 6,
   };
@@ -205,14 +213,27 @@ async function generate() {
     viewer.content.add(terrain);
     viewer.helpers.add(selectionBox);
 
-    project = { bbox: area, frame, surface, osm, buildingsMesh: null, records: [], terrain };
+    project = { bbox: area, frame, surface, osm, buildingsMesh: null, records: [], terrain, texture, facade: facadeTexture() };
     if (osm && $<HTMLInputElement>("with-roads").checked) {
       const roads = buildRoads(osm.roads, osm.railways, frame, surface);
       if (roads) viewer.content.add(roads);
     }
+    if (osm && $<HTMLInputElement>("with-water").checked) {
+      const water = buildWater(osm.areas, osm.waterways, frame, surface);
+      if (water) viewer.content.add(water);
+    }
     rebuildBuildings();
+    if ($<HTMLInputElement>("with-trees").checked) {
+      const trees = buildTrees(osm, frame, surface, { maxTrees: isTouch ? 8000 : 25000, imagery });
+      if (trees) {
+        viewer.content.add(trees);
+        log(`Vegetación: ${(trees.children[0] as THREE.InstancedMesh).count} árboles`);
+      }
+    }
 
-    viewer.frame(surface.width, surface.depth, (surface.minHeight + surface.maxHeight) / 2);
+    viewer.frame(surface.width, surface.depth, surface.minX, surface.maxX, -surface.maxY, -surface.minY, (x, z) =>
+      surface.heightAt(x, -z),
+    );
     updateSun();
     for (const id of ["user-section", "sun-section", "export-section"]) $(id).classList.remove("disabled");
     showView("three");
@@ -234,7 +255,7 @@ function rebuildBuildings() {
   if (project.buildingsMesh) {
     viewer.content.remove(project.buildingsMesh);
     project.buildingsMesh.geometry.dispose();
-    (project.buildingsMesh.material as THREE.Material).dispose();
+    for (const m of project.buildingsMesh.material as THREE.Material[]) m.dispose();
     project.buildingsMesh = null;
   }
   project.records = [];
@@ -245,16 +266,17 @@ function rebuildBuildings() {
     const c = ringCentroid(b.polygons[0].outer);
     return c.lat >= area.south && c.lat <= area.north && c.lng >= area.west && c.lng <= area.east;
   });
-  const { mesh, records } = buildBuildings(inside, frame, surface, heightOptions(), overrides, hidden);
+  const { mesh, records } = buildBuildings(inside, frame, surface, buildingOptions(), overrides, hidden, project.texture, project.facade);
   project.buildingsMesh = mesh;
   project.records = records;
   if (mesh) viewer.content.add(mesh);
   const estimated = records.filter((r) => r.height.source === "default" || r.height.source === "type").length;
-  log(`Edificios: ${records.length} modelados (${estimated} con altura estimada, en gris claro)`);
+  const pitched = records.filter((r) => r.roof !== "flat").length;
+  log(`Edificios: ${records.length} modelados (${estimated} con altura estimada, en gris claro; ${pitched} con cubierta inclinada)`);
   viewer.invalidate();
 }
 
-for (const id of ["level-h", "default-h"]) $(id).addEventListener("change", () => rebuildBuildings());
+for (const id of ["level-h", "default-h", "auto-roofs"]) $(id).addEventListener("change", () => rebuildBuildings());
 
 function selectBuilding(rec: BuildingRecord | null) {
   const section = $("building-section");
@@ -306,7 +328,9 @@ function highlight(rec: BuildingRecord) {
   const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
   const box = new THREE.Box3();
   const v = new THREE.Vector3();
-  for (let k = rec.triStart * 3; k <= rec.triEnd * 3 + 2; k++) box.expandByPoint(v.fromBufferAttribute(pos, k));
+  for (const [start, end] of rec.spans) {
+    for (let k = start * 3; k <= end * 3 + 2; k++) box.expandByPoint(v.fromBufferAttribute(pos, k));
+  }
   const proxy = new THREE.Mesh(new THREE.BoxGeometry(...box.getSize(new THREE.Vector3()).toArray()));
   proxy.position.copy(box.getCenter(new THREE.Vector3()));
   proxy.updateMatrixWorld();
@@ -317,6 +341,11 @@ function highlight(rec: BuildingRecord) {
 }
 
 /* ---------- Interacción en 3D ---------- */
+
+$("cam-home").addEventListener("click", () => viewer.recenter());
+$("cam-top").addEventListener("click", () => viewer.topView());
+$("cam-in").addEventListener("click", () => viewer.zoom(0.6));
+$("cam-out").addEventListener("click", () => viewer.zoom(1.6));
 
 const raycaster = new THREE.Raycaster();
 const canvasEl = viewer.renderer.domElement;
