@@ -168,6 +168,7 @@ async function generate() {
   const btn = $<HTMLButtonElement>("generate");
   btn.disabled = true;
   $("log").textContent = "";
+  $("scene-status").hidden = true;
   overrides.clear();
   hidden.clear();
   selectBuilding(null);
@@ -246,9 +247,37 @@ async function generate() {
         ? "1 dedo: mover · 2 dedos: girar y zoom · Toca un edificio para editarlo"
         : "Arrastra: mover · Clic derecho / Ctrl: girar · Rueda: zoom · Clic en un edificio: editar",
     );
+    const nBuildings = project.records.length;
+    if (!osm && wantOsm) {
+      setStatus("No se pudieron cargar edificios ni vías: los servidores de OpenStreetMap no respondieron.", true);
+    } else if (osm && $<HTMLInputElement>("with-buildings").checked && !nBuildings) {
+      setStatus("OpenStreetMap no tiene edificios mapeados en esta zona.", false);
+    } else {
+      setStatus(`${nBuildings} edificios · ${osm?.roads.length ?? 0} vías · ${bodies.length} cuerpos de agua`, false);
+    }
     log("Listo.");
   } finally {
     btn.disabled = false;
+  }
+}
+
+/** Resumen visible sobre la vista 3D; en caso de aviso, con botón para reintentar. */
+function setStatus(text: string, warn: boolean) {
+  const el = $("scene-status");
+  el.hidden = false;
+  el.className = warn ? "warn" : "";
+  el.textContent = text;
+  if (warn) {
+    const retry = document.createElement("button");
+    retry.textContent = "Reintentar";
+    retry.addEventListener("click", () => generate().catch((err) => log(`Error: ${(err as Error).message}`)));
+    el.appendChild(retry);
+  } else {
+    // el resumen se retira solo; los avisos se quedan hasta reintentar
+    const shown = text;
+    setTimeout(() => {
+      if (el.textContent === shown) el.hidden = true;
+    }, 8000);
   }
 }
 

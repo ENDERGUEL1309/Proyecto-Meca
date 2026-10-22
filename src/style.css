@@ -62,6 +62,13 @@ main { flex: 1; position: relative; display: flex; flex-direction: column; min-w
 .view.active { display: block; }
 #three { position: relative; }
 #three canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+#scene-status {
+  position: absolute; left: 10px; top: 10px; right: 10px; z-index: 5; width: fit-content; max-width: calc(100% - 20px);
+  background: color-mix(in srgb, var(--panel) 90%, transparent); backdrop-filter: blur(6px);
+  border-radius: 8px; padding: 6px 10px; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+#scene-status.warn { border-left: 4px solid var(--accent); }
+#scene-status button { margin-left: 8px; padding: 2px 8px; }
 #view-tools {
   position: absolute; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 5;
   display: flex; flex-direction: column; gap: 6px; align-items: stretch;
@@ -90,7 +97,14 @@ main { flex: 1; position: relative; display: flex; flex-direction: column; min-w
   input, select, button { font-size: 16px; }
   .card label, .card { font-size: 14px; }
   /* controles de cámara compactos: una fila de iconos que no tapa el modelo */
-  #view-tools { flex-direction: row; right: 8px; bottom: 8px; gap: 4px; }
+  #scene-status {
+  position: absolute; left: 10px; top: 10px; right: 10px; z-index: 5; width: fit-content; max-width: calc(100% - 20px);
+  background: color-mix(in srgb, var(--panel) 90%, transparent); backdrop-filter: blur(6px);
+  border-radius: 8px; padding: 6px 10px; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+#scene-status.warn { border-left: 4px solid var(--accent); }
+#scene-status button { margin-left: 8px; padding: 2px 8px; }
+#view-tools { flex-direction: row; right: 8px; bottom: 8px; gap: 4px; }
   #view-tools button { min-width: 40px; min-height: 40px; padding: 4px; font-size: 18px; line-height: 1; }
   #view-tools button span { display: none; }
 }

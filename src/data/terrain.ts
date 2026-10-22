@@ -1,6 +1,7 @@
 import type { BBox, ProgressFn } from "../types";
 import { lngLatToMercator, tileMercatorBounds, tileRange } from "../geo/mercator";
-import { loadBitmap, mapLimit } from "./fetching";
+import { decode } from "fast-png";
+import { mapLimit } from "./fetching";
 
 /** Fuente de elevación consultable en cualquier punto. Devuelve NaN fuera de cobertura. */
 export interface ElevationSampler {
@@ -68,6 +69,27 @@ export function bilinear(data: ArrayLike<number>, w: number, h: number, px: numb
   return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
 }
 
+/**
+ * Descarga y decodifica un PNG en JavaScript, sin pasar por <canvas>.
+ * Las alturas Terrarium van codificadas en los bytes del color, y leerlas desde un
+ * canvas no es fiable: Brave añade ruido anti-huellas a getImageData y Safari puede
+ * aplicar gestión de color. Un byte de diferencia en el rojo son 256 m de error.
+ */
+async function loadPng(url: string, signal?: AbortSignal) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, { signal, mode: "cors" });
+      if (!res.ok) continue;
+      const png = decode(new Uint8Array(await res.arrayBuffer()));
+      if (png.depth !== 8 || png.channels < 3) throw new Error(`PNG de elevación no soportado (${png.channels} canales, ${png.depth} bits)`);
+      return { data: png.data as Uint8Array, channels: png.channels, width: png.width };
+    } catch (err) {
+      if ((err as Error).name === "AbortError") throw err;
+    }
+  }
+  return null;
+}
+
 /** Codificación Terrarium (Mapzen / AWS Terrain Tiles). */
 export function decodeTerrarium(r: number, g: number, b: number): number {
   return r * 256 + g + b / 256 - 32768;
@@ -100,22 +122,17 @@ export async function fetchTerrariumGrid(bbox: BBox, progress: ProgressFn, signa
   const tiles: { x: number; y: number }[] = [];
   for (let y = r.minY; y <= r.maxY; y++) for (let x = r.minX; x <= r.maxX; x++) tiles.push({ x, y });
 
-  const canvas = new OffscreenCanvas(256, 256);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   let done = 0;
   await mapLimit(tiles, 6, async (t) => {
     const url = TERRARIUM_URL.replace("{z}", String(z)).replace("{x}", String(t.x)).replace("{y}", String(t.y));
-    const bmp = await loadBitmap(url, signal);
-    if (!bmp) throw new Error(`No se pudo descargar la tesela de elevación ${z}/${t.x}/${t.y}`);
-    ctx.clearRect(0, 0, 256, 256);
-    ctx.drawImage(bmp, 0, 0);
-    bmp.close();
-    const px = ctx.getImageData(0, 0, 256, 256).data;
+    const png = await loadPng(url, signal);
+    if (!png) throw new Error(`No se pudo descargar la tesela de elevación ${z}/${t.x}/${t.y}`);
+    const { data: px, channels: c, width: tw } = png;
     const ox = (t.x - r.minX) * 256;
     const oy = (t.y - r.minY) * 256;
     for (let j = 0; j < 256; j++) {
       for (let i = 0; i < 256; i++) {
-        const k = (j * 256 + i) * 4;
+        const k = (j * tw + i) * c;
         data[(oy + j) * W + ox + i] = decodeTerrarium(px[k], px[k + 1], px[k + 2]);
       }
     }

@@ -46,7 +46,8 @@ npm run build    # sitio estático en dist/
    - el terreno de la planta y un margen se rebaja hacia ese suelo, como una excavación, con un máximo de 4 m (sin fosos ni acantilados);
    - si en pendiente el terreno sigue por encima, el edificio se eleva hasta 6 m, como las casas de ladera escalonadas.
 8. Se omiten los polígonos `building=yes` sin altura que son enormes (> 15.000 m²) o que cruzan más de 10 m de desnivel: casi siempre son manzanas enteras mapeadas como un solo edificio.
-9. El DEM se limpia antes de usarlo: se acota la batimetría absurda de ríos y estuarios (p. ej. −424 m en el Guayas) y se eliminan los picos aislados.
+9. Las teselas de elevación se decodifican en JavaScript (`fast-png`), sin pasar por `<canvas>`. Las cotas van codificadas en los bytes de color, y la protección anti-huellas de Brave (o la gestión de color de Safari) altera esos bytes: un byte de diferencia en el rojo son 256 m de error.
+10. El DEM se limpia antes de usarlo: se acota la batimetría absurda de ríos y estuarios (p. ej. −424 m en el Guayas) y se eliminan los picos aislados.
 
 ## Realismo de la escena
 

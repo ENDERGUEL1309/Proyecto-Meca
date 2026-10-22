@@ -5,9 +5,10 @@ export const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
 ];
 
-const OVERPASS_TIMEOUT_MS = 60_000;
+const OVERPASS_TIMEOUT_MS = 45_000;
 
 export interface BuildingFeature {
   id: string;
@@ -157,7 +158,7 @@ export async function fetchOsm(bbox: BBox, progress: ProgressFn, signal?: AbortS
   for (const url of OVERPASS_ENDPOINTS) {
     try {
       progress(`OpenStreetMap: consultando ${new URL(url).host}…`);
-      // un servidor colgado no debe bloquear el resto: se corta a los 60 s y se prueba el siguiente
+      // un servidor colgado no debe bloquear el resto: se corta a los 45 s y se prueba el siguiente
       const timeout = AbortSignal.timeout(OVERPASS_TIMEOUT_MS);
       const res = await fetch(url, {
         method: "POST",
